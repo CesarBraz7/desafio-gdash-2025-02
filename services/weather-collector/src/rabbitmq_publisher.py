@@ -1,7 +1,7 @@
 import pika
 import json
 import time
-from typing import Dict
+from typing import Dict, Optional
 from config import Config
 
 
@@ -9,33 +9,49 @@ class RabbitMQPublisher:
     def __init__(self):
         self.connection = None
         self.channel = None
-        self.max_retries = 3
+        self.max_retries = 5
+        self.retry_delay_base = 1
         self._connect()
     
-    def _connect(self):
-        try:
-            print(f"Conectando ao RabbitMQ...")
-            
-            parameters = pika.URLParameters(Config.RABBITMQ_URL)
-            parameters.socket_timeout = 10
-            
-            self.connection = pika.BlockingConnection(parameters)
-            self.channel = self.connection.channel()
-            
-            self.channel.exchange_declare(
-                exchange=Config.RABBITMQ_EXCHANGE,
-                exchange_type='direct',
-                durable=True
-            )
-            
-            print(f"RabbitMQ conectado (exchange: {Config.RABBITMQ_EXCHANGE})")
-            
-        except pika.exceptions.AMQPConnectionError as e:
-            print(f"Erro ao conectar no RabbitMQ: {e}")
-            raise
-        except Exception as e:
-            print(f"Erro inesperado ao conectar no RabbitMQ: {e}")
-            raise
+    def _connect(self, max_attempts: Optional[int] = None):
+        attempts = max_attempts or self.max_retries
+        for attempt in range(1, attempts + 1):
+            try:
+                print(f"Conectando ao RabbitMQ...")
+                
+                parameters = pika.URLParameters(Config.RABBITMQ_URL)
+                parameters.socket_timeout = 10
+                parameters.connection_attempts = 3
+                parameters.retry_delay = 2
+                
+                self.connection = pika.BlockingConnection(parameters)
+                self.channel = self.connection.channel()
+                
+                self.channel.exchange_declare(
+                    exchange=Config.RABBITMQ_EXCHANGE,
+                    exchange_type='direct',
+                    durable=True
+                )
+                
+                print(f"RabbitMQ conectado (exchange: {Config.RABBITMQ_EXCHANGE})")
+                
+            except pika.exceptions.AMQPConnectionError as e:
+                if attempt < attempts:
+                    wait_time = self.retry_delay_base * (2 ** (attempt - 1))
+                    print(f"Falha na tentativa {attempt}/{attempts}: {str(e)[:100]}")
+                    print(f"Aguardando {wait_time}s antes da próxima tentativa...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"Falha após {attempts} tentativas. RabbitMQ indisponível.")
+                    raise
+                    
+            except Exception as e:
+                print(f"Erro inesperado ao conectar: {e}")
+                if attempt < attempts:
+                    wait_time = self.retry_delay_base * (2 ** (attempt - 1))
+                    time.sleep(wait_time)
+                else:
+                    raise
     
     def publish(self, weather_data: Dict) -> bool:
         if not weather_data:
