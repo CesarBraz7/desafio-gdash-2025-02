@@ -1,4 +1,5 @@
 import { Controller, Post, Body, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { GenerateInsightService } from './generate-insight.service';
 import { GenerateInsightDto } from '../../dto/generate-insight.dto';
 import { JwtAuthGuard } from '../../../../shared/guards/jwt-auth.guard';
@@ -11,6 +12,7 @@ export class GenerateInsightController {
 
   @Post(API_ROUTES.INSIGHTS.GENERATE)
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async generate(@Body() generateInsightDto: GenerateInsightDto) {
     return this.generateInsightService.generate(generateInsightDto);
   }
